@@ -119,9 +119,14 @@ final class ScreenshotWatcher {
         known = now
         for name in added where !name.hasPrefix(".") {
             let url = folder.appendingPathComponent(name)
-            if isCapture(url) { waitUntilWritten(url) }
+            guard isCapture(url) else { continue }
+            // macOS writes a screenshot in full before it appears under its real name, so show it
+            // at once; only recordings need time to finish.
+            if ScreenshotWatcher.isMovie(url) { waitUntilWritten(url) } else { onNewCapture?(url) }
         }
     }
+
+    static func isMovie(_ url: URL) -> Bool { ["mov", "mp4"].contains(url.pathExtension.lowercased()) }
 
     /// macOS tags screenshots with kMDItemIsScreenCapture; recordings are matched by name.
     private func isCapture(_ url: URL) -> Bool {
@@ -202,6 +207,18 @@ final class PreviewView: NSView, NSDraggingSource {
 
     private func loadThumbnail(size: NSSize) {
         let scale = NSScreen.main?.backingScaleFactor ?? 2
+        // Images: decode a small copy straight from the file. Much faster than Quick Look.
+        if !ScreenshotWatcher.isMovie(fileURL), let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: max(size.width, size.height) * scale,
+            ]
+            if let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                imageView.image = NSImage(cgImage: cg, size: size)
+                return
+            }
+        }
         let request = QLThumbnailGenerator.Request(fileAt: fileURL, size: CGSize(width: size.width, height: size.height),
                                                    scale: scale, representationTypes: .thumbnail)
         QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { [weak self] rep, _ in
@@ -329,9 +346,9 @@ final class PreviewStack {
         view.onUserTouched = { [weak self, weak panel] in if let panel { self?.cancelTimer(panel) } }
         panel.contentView = view
 
-        // Slide in from the right edge, like the built-in preview.
+        // A short slide in from the right, like the built-in preview but quicker.
         let visible = screen.visibleFrame
-        panel.setFrameOrigin(NSPoint(x: visible.maxX + 10, y: visible.minY + margin))
+        panel.setFrameOrigin(NSPoint(x: visible.maxX - size.width - margin + 40, y: visible.minY + margin))
         panels.insert(panel, at: 0)
         panel.orderFrontRegardless()
 
@@ -344,8 +361,11 @@ final class PreviewStack {
 
     private func cardSize(for url: URL) -> NSSize {
         let width: CGFloat = 220
-        if let rep = NSImageRep(contentsOf: url), rep.pixelsWide > 0, rep.pixelsHigh > 0 {
-            let ratio = CGFloat(rep.pixelsHigh) / CGFloat(rep.pixelsWide)
+        // Read only the image's dimensions from its header, without decoding it.
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let w = props[kCGImagePropertyPixelWidth] as? CGFloat, let h = props[kCGImagePropertyPixelHeight] as? CGFloat, w > 0, h > 0 {
+            let ratio = h / w
             return NSSize(width: width, height: min(max(width * ratio, 80), 260))
         }
         return NSSize(width: width, height: 140)
@@ -356,7 +376,7 @@ final class PreviewStack {
         let visible = screen.visibleFrame
         var y = visible.minY + margin
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = animated ? 0.25 : 0
+            ctx.duration = animated ? 0.15 : 0
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             for panel in panels {
                 let size = panel.frame.size
