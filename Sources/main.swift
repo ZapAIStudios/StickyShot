@@ -215,7 +215,7 @@ final class PreviewView: NSView, NSDraggingSource {
                 kCGImageSourceThumbnailMaxPixelSize: max(size.width, size.height) * scale,
             ]
             if let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
-                imageView.image = NSImage(cgImage: cg, size: size)
+                show(cg, size: size)
                 return
             }
         }
@@ -223,10 +223,33 @@ final class PreviewView: NSView, NSDraggingSource {
                                                    scale: scale, representationTypes: .thumbnail)
         QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { [weak self] rep, _ in
             DispatchQueue.main.async {
-                if let rep { self?.imageView.image = rep.nsImage }
+                if let rep { self?.show(rep.cgImage, size: size) }
                 else { self?.imageView.image = NSWorkspace.shared.icon(forFile: self?.fileURL.path ?? "") }
             }
         }
+    }
+
+    private func show(_ image: CGImage, size: NSSize) {
+        imageView.image = NSImage(cgImage: image, size: size)
+        // A white × vanishes on a light screenshot, so use black there.
+        let light = PreviewView.brightness(of: image, under: closeButton.frame, in: bounds) > 0.6
+        closeButton.contentTintColor = light ? .black : .white
+        closeButton.layer?.shadowColor = (light ? NSColor.white : NSColor.black).cgColor
+    }
+
+    /// Average brightness (0 = black, 1 = white) of the part of the image beneath `area`.
+    private static func brightness(of image: CGImage, under area: NSRect, in card: NSRect) -> CGFloat {
+        let sx = CGFloat(image.width) / card.width, sy = CGFloat(image.height) / card.height
+        // View coordinates start at the bottom; image coordinates start at the top.
+        let crop = CGRect(x: area.minX * sx, y: (card.height - area.maxY) * sy, width: area.width * sx, height: area.height * sy)
+        guard let patch = image.cropping(to: crop.integral),
+              let ctx = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return 0 }
+        ctx.interpolationQuality = .medium
+        ctx.draw(patch, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        guard let p = ctx.data?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+        return (0.299 * CGFloat(p[0]) + 0.587 * CGFloat(p[1]) + 0.114 * CGFloat(p[2])) / 255
     }
 
     override func updateTrackingAreas() {
