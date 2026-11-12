@@ -150,6 +150,9 @@ final class ScreenshotWatcher {
 // MARK: - Preview card
 
 final class PreviewView: NSView, NSDraggingSource {
+    /// Supplies the app's settings menu, so it can be reached from a preview too.
+    static var settingsMenu: (() -> NSMenu)?
+
     let fileURL: URL
     var onClose: (() -> Void)?
     var onUserTouched: (() -> Void)?
@@ -217,10 +220,26 @@ final class PreviewView: NSView, NSDraggingSource {
         tracking = area
     }
 
+    /// The card handles every click itself, except on the × button.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let local = superview.map({ convert(point, from: $0) }), bounds.contains(local) else { return nil }
+        if !closeButton.isHidden, closeButton.frame.contains(local) { return closeButton }
+        return self
+    }
+
     override func mouseEntered(with event: NSEvent) { closeButton.isHidden = false; onUserTouched?() }
     override func mouseExited(with event: NSEvent) { closeButton.isHidden = true }
 
-    override func mouseDown(with event: NSEvent) { mouseDownPoint = event.locationInWindow }
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) { return rightMouseDown(with: event) }
+        mouseDownPoint = event.locationInWindow
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        mouseDownPoint = nil
+        onUserTouched?()
+        if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+    }
 
     override func mouseDragged(with event: NSEvent) {
         guard let start = mouseDownPoint else { return }
@@ -245,6 +264,10 @@ final class PreviewView: NSView, NSDraggingSource {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Move to Trash", action: #selector(trashFile), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Close", action: #selector(closeClicked), keyEquivalent: "").target = self
+        if let settings = PreviewView.settingsMenu?() {
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "StickyShot", action: nil, keyEquivalent: "").submenu = settings
+        }
         return menu
     }
 
@@ -252,11 +275,8 @@ final class PreviewView: NSView, NSDraggingSource {
         context == .outsideApplication ? [.copy] : []
     }
 
-    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        if operation != [] { onClose?() }
-    }
-
-    @objc private func openFile() { NSWorkspace.shared.open(fileURL); onClose?() }
+    // Dragging or opening a screenshot leaves its preview up; only the × (or Close, or the timer) removes it.
+    @objc private func openFile() { NSWorkspace.shared.open(fileURL) }
     @objc private func revealFile() { NSWorkspace.shared.activateFileViewerSelecting([fileURL]) }
     @objc private func closeClicked() { onClose?() }
 
@@ -386,7 +406,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         watcher.onNewCapture = { [weak self] url in self?.stack.show(url) }
+        PreviewView.settingsMenu = { [weak self] in
+            let menu = NSMenu()
+            self?.fill(menu)
+            return menu
+        }
         apply()
+    }
+
+    /// Opening StickyShot again (from Applications, Spotlight or Launchpad) shows its menu at the
+    /// pointer, so it stays reachable when the menu bar is full or hides the icon.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        let menu = NSMenu()
+        fill(menu)
+        NSApp.activate(ignoringOtherApps: true)
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -406,7 +441,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // Rebuilt every time it opens, so it always reflects the current state.
-    func menuNeedsUpdate(_ menu: NSMenu) {
+    func menuNeedsUpdate(_ menu: NSMenu) { fill(menu) }
+
+    private func fill(_ menu: NSMenu) {
         menu.removeAllItems()
         if Settings.enabled { watcher.start() }  // picks up a changed save folder
 

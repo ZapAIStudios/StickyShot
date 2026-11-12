@@ -6,7 +6,7 @@ The screenshot preview in the corner of a Mac disappears after about five second
 
 - Every screenshot or screen recording shows a preview in the lower-right corner of the screen you're on, and it stays until you close it.
 - Several screenshots stack up, newest at the bottom, up to five at a time.
-- **Click** a preview to open it. **Drag** it into Mail, Slack, Messages or any app. Hover over it to show the **×**, or **right-click** for Copy, Show in Finder and Move to Trash.
+- **Click** a preview to open it. **Drag** it into Mail, Slack, Messages or any app. The preview stays up afterwards, so you can use it again. Hover over it to show the **×**, or **right-click** for Copy, Show in Finder and Move to Trash.
 - The menu bar icon (a camera viewfinder) has these options:
   - Turn it on or off.
   - Have previews close after 10 seconds, 30 seconds, 1 minute or 5 minutes instead of staying up.
