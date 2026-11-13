@@ -1,5 +1,9 @@
 # StickyShot
 
+![StickyShot: your Mac screenshot preview, kept on screen until you close it](Branding/StickyShot-hero.png)
+
+**[Download StickyShot for Mac](https://github.com/ZapAIStudios/StickyShot/releases/latest/download/StickyShot.zip)** (free, macOS 13 or later)
+
 The screenshot preview in the corner of a Mac disappears after about five seconds, and macOS has no setting to change that. StickyShot keeps it on screen until you close it.
 
 ## What it does

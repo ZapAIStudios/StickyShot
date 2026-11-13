@@ -41,6 +41,22 @@ let bolt: CGImage = {
     }
     return ctx.makeImage()!
 }()
+/// The bolt's bottom tip, as a fraction of the image (origin bottom-left), found from its pixels.
+let boltTip: CGPoint = {
+    let w = bolt.width, h = bolt.height
+    let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.draw(bolt, in: CGRect(x: 0, y: 0, width: w, height: h))
+    let p = ctx.data!.assumingMemoryBound(to: UInt8.self)
+    // Bitmap context memory starts at the top row; walk up from the bottom row to the first opaque pixels.
+    for row in stride(from: h - 1, through: 0, by: -1) {
+        let xs = (0..<w).filter { p[(row * w + $0) * 4 + 3] > 100 }
+        if !xs.isEmpty {
+            return CGPoint(x: CGFloat(xs.reduce(0, +)) / CGFloat(xs.count) / CGFloat(w), y: 1 - CGFloat(row) / CGFloat(h))
+        }
+    }
+    return CGPoint(x: 0.5, y: 0)
+}()
 let wordmark = NSImage(contentsOf: brandDir.appendingPathComponent("wordmark-yellow.png"))!
 
 func render(_ w: Int, _ h: Int, _ draw: (CGFloat, CGFloat) -> Void) -> NSBitmapImageRep {
@@ -151,9 +167,10 @@ func drawIcon(_ s: CGFloat) {
     drawScreenshotCard(card, radius: s * 0.035, dark: false, accent: zapBlue.withAlphaComponent(0.85), closeButton: false)
 
     // Impact sparks where the bolt strikes the top of the card
-    let hit = NSPoint(x: s * 0.415, y: card.maxY)  // where the bolt's tip lands
+    let hit = NSPoint(x: card.midX, y: card.maxY)  // the bolt's tip lands on the card's top centre
     let sparks = NSBezierPath()
-    for (angle, inner, outer) in [(155.0, 0.06, 0.11), (25.0, 0.06, 0.11), (125.0, 0.07, 0.11), (55.0, 0.07, 0.11)] {
+    // Mirrored pairs, evenly either side of the strike
+    for (angle, inner, outer) in [(168.0, 0.055, 0.115), (12.0, 0.055, 0.115), (138.0, 0.065, 0.115), (42.0, 0.065, 0.115)] {
         let a = angle * .pi / 180
         sparks.move(to: NSPoint(x: hit.x + cos(a) * s * inner, y: hit.y + sin(a) * s * inner))
         sparks.line(to: NSPoint(x: hit.x + cos(a) * s * outer, y: hit.y + sin(a) * s * outer))
@@ -174,17 +191,85 @@ func drawIcon(_ s: CGFloat) {
 
     NSGraphicsContext.saveGraphicsState()
     shadow(s * 0.02, s * 0.01, 0.4)
-    drawBolt(in: NSRect(x: s * 0.4, y: s * 0.475, width: s * 0.2, height: s * 0.225), rotation: 0)
+    // Stand the bolt more upright and place it so its tip just touches the card's top edge
+    let rot: CGFloat = 22, bh = s * 0.18, bw = bh * CGFloat(bolt.width) / CGFloat(bolt.height)
+    let ox = (boltTip.x - 0.5) * bw, oy = (boltTip.y - 0.5) * bh
+    let a = rot * .pi / 180
+    let cx = hit.x - (ox * cos(a) - oy * sin(a)), cy = hit.y - (ox * sin(a) + oy * cos(a))
+    drawBolt(in: NSRect(x: cx - bw / 2, y: cy - bh / 2, width: bw, height: bh), rotation: rot)
+    NSGraphicsContext.restoreGraphicsState()
+}
+
+/// The app icon: small ZAP bug top left, the StickyShot name centred, the screenshot card below. No bolt or sparks.
+func drawAppIcon(_ s: CGFloat) {
+    let tile = NSRect(x: s * 0.098, y: s * 0.098, width: s * 0.804, height: s * 0.804)
+    let path = NSBezierPath(roundedRect: tile, xRadius: s * 0.18, yRadius: s * 0.18)
+    NSGraphicsContext.saveGraphicsState()
+    shadow(s * 0.02, s * 0.01, 0.3)
+    zapBlue.setFill()
+    path.fill()
+    NSGraphicsContext.restoreGraphicsState()
+    NSGraphicsContext.saveGraphicsState()
+    path.addClip()
+    NSGradient(colors: [hex(0x5CC4FF), zapBlue, zapBlueDeep])!.draw(in: tile, angle: -70)
+
+    // Golden-ratio layout. φ sets the type widths and every vertical gap.
+    let phi: CGFloat = 1.618
+    let card = NSRect(x: s * 0.255, y: s * 0.17, width: s * 0.49, height: s * 0.33)
+
+    // ZAP bug, top left, inset from the tile corner by the same margin on both sides
+    let inset = s * 0.077
+    let bugW = s * 0.12
+    let bugH = bugW * wordmark.size.height / wordmark.size.width
+    let bug = NSRect(x: tile.minX + inset, y: tile.maxY - inset - bugH, width: bugW, height: bugH)
+    wordmark.draw(in: bug)
+
+    // Fit a line of text to an exact ink width; returns it with its ink bounds at size 1 scaled up.
+    func fitted(_ text: String, _ fontName: String, _ color: NSColor, width: CGFloat, kern: CGFloat) -> (NSAttributedString, CGRect) {
+        func make(_ size: CGFloat) -> NSAttributedString {
+            NSAttributedString(string: text, attributes: [.font: font(fontName, size), .foregroundColor: color, .kern: kern * size])
+        }
+        let probe = CTLineGetBoundsWithOptions(CTLineCreateWithAttributedString(make(100)), .useGlyphPathBounds)
+        let size = 100 * width / probe.width
+        let str = make(size)
+        return (str, CTLineGetBoundsWithOptions(CTLineCreateWithAttributedString(str), .useGlyphPathBounds))
+    }
+    // Headline spans the card's width; the tagline is the headline less 1/φ⁴ (about 85%)
+    let headW = card.width * 1.3
+    let (title, tb) = fitted("StickyShot", "Aeonik-Bold", cream, width: headW, kern: -0.02)
+    let (tagline, gb) = fitted("Screenshots that stick around.", "Aeonik-Medium", .white, width: headW * (1 - pow(1 / phi, 4)), kern: 0)
+
+    // Gaps measured ink to ink: tagline↔headline = g, headline↔ZAP and card↔tagline = g·φ
+    let room = bug.minY - card.maxY - tb.height - gb.height
+    let g = room / (1 + 2 * phi)
+    let tagBottom = card.maxY + g * phi
+    let headBottom = tagBottom + gb.height + g
+
+    // Draw each line from its baseline so the ink lands exactly where the gaps say
+    func drawLine(_ str: NSAttributedString, _ b: CGRect, inkBottom: CGFloat) {
+        let ctx = NSGraphicsContext.current!.cgContext
+        ctx.textMatrix = .identity
+        ctx.textPosition = CGPoint(x: (s - b.width) / 2 - b.minX, y: inkBottom - b.minY)
+        CTLineDraw(CTLineCreateWithAttributedString(str), ctx)
+    }
+    NSGraphicsContext.saveGraphicsState()
+    shadow(s * 0.015, s * 0.008, 0.25)
+    drawLine(title, tb, inkBottom: headBottom)
+    NSGraphicsContext.restoreGraphicsState()
+    drawLine(tagline, gb, inkBottom: tagBottom)
+
+    // The screenshot card
+    drawScreenshotCard(card, radius: s * 0.035, dark: false, accent: zapBlue.withAlphaComponent(0.85), closeButton: false)
     NSGraphicsContext.restoreGraphicsState()
 }
 
 let iconset = outDir.appendingPathComponent("AppIcon.iconset")
 try? FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 for base in [16, 32, 128, 256, 512] {
-    save(render(base, base) { s, _ in drawIcon(s) }, iconset.appendingPathComponent("icon_\(base)x\(base).png"))
-    save(render(base * 2, base * 2) { s, _ in drawIcon(s) }, iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
+    save(render(base, base) { s, _ in drawAppIcon(s) }, iconset.appendingPathComponent("icon_\(base)x\(base).png"))
+    save(render(base * 2, base * 2) { s, _ in drawAppIcon(s) }, iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
 }
-save(render(1024, 1024) { s, _ in drawIcon(s) }, outDir.appendingPathComponent("StickyShot-icon-1024.png"))
+save(render(1024, 1024) { s, _ in drawAppIcon(s) }, outDir.appendingPathComponent("StickyShot-icon-1024.png"))
 
 // MARK: Hero image (2:1, for the GitHub page and social cards)
 
@@ -200,7 +285,7 @@ save(render(2560, 1280) { W, H in
     // Left: icon and name on one row, the pitch, then the benefits
     let left = W * 0.065
     let iconSize = H * 0.19
-    let icon = render(Int(iconSize * 2), Int(iconSize * 2)) { s, _ in drawIcon(s) }
+    let icon = render(Int(iconSize * 2), Int(iconSize * 2)) { s, _ in drawAppIcon(s) }
     icon.draw(in: NSRect(x: left - iconSize * 0.1, y: H * 0.755, width: iconSize, height: iconSize), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
 
     let title = NSAttributedString(string: "StickyShot", attributes: [.font: font("Aeonik-Bold", H * 0.125), .foregroundColor: cream, .kern: -H * 0.003])
