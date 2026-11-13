@@ -328,8 +328,13 @@ save(render(2560, 1280) { W, H in
     let site = NSAttributedString(string: "getzapped.xyz", attributes: [.font: font("Aeonik-Medium", H * 0.03), .foregroundColor: NSColor.white.withAlphaComponent(0.9)])
     site.draw(at: NSPoint(x: byX + by.size().width + H * 0.016 + wmW + H * 0.03, y: tag.minY + H * 0.008))
 
-    // Right: a Mac desktop with StickyShot's menu open and previews stacked, newest at the bottom
-    let screen = NSRect(x: W * 0.595, y: H * 0.075, width: W * 0.378, height: H * 0.85)
+    // Right: a Mac desktop with StickyShot's menu open and previews stacked
+    drawDesktop(NSRect(x: W * 0.595, y: H * 0.075, width: W * 0.378, height: H * 0.85), H, cards: 3, cardFrac: 0.28)
+}, outDir.appendingPathComponent("StickyShot-hero.png"))
+
+/// A Mac desktop with StickyShot's menu open and previews stacked in the corner, newest at the bottom.
+/// H is the size unit everything inside is measured in.
+func drawDesktop(_ screen: NSRect, _ H: CGFloat, cards cardCount: Int, cardFrac: CGFloat) {
     NSGraphicsContext.saveGraphicsState()
     shadow(H * 0.05, H * 0.02, 0.35)
     let screenPath = NSBezierPath(roundedRect: screen, xRadius: H * 0.03, yRadius: H * 0.03)
@@ -430,10 +435,10 @@ save(render(2560, 1280) { W, H in
     }
 
     // Previews stacked in the lower right, newest at the bottom
-    let cw = screen.width * 0.28, gap = H * 0.02, margin = H * 0.03
+    let cw = screen.width * cardFrac, gap = H * 0.02, margin = H * 0.03
     var y = screen.minY + margin
     let cards: [(CGFloat, Bool, NSColor, Bool)] = [(0.64, false, zapBlue, true), (0.6, true, cream, false), (0.62, false, hex(0xFF8A65), false)]
-    for (ratio, dark, accent, hovered) in cards {
+    for (ratio, dark, accent, hovered) in cards.prefix(cardCount) {
         let ch = cw * ratio
         drawScreenshotCard(NSRect(x: screen.maxX - cw - margin, y: y, width: cw, height: ch), radius: H * 0.012,
                            dark: dark, accent: accent, closeButton: hovered)
@@ -446,5 +451,70 @@ save(render(2560, 1280) { W, H in
         let a = H * 0.06
         NSGraphicsContext.current!.cgContext.draw(arrow, in: CGRect(x: hoverRow.minX + hoverRow.width * 0.55, y: hoverRow.midY - a * 0.85, width: a * 0.7, height: a))
     }
-}, outDir.appendingPathComponent("StickyShot-hero.png"))
+}
+
+// MARK: Instagram post (4:5 portrait, 2160×2700; Instagram shows it at 1080×1350)
+
+save(render(2160, 2700) { W, H in
+    NSGradient(colors: [hex(0x47BCFF), zapBlue, zapBlueDeep])!.draw(in: NSRect(x: 0, y: 0, width: W, height: H), angle: -60)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current!.cgContext.setAlpha(0.07)
+    drawBolt(in: NSRect(x: W * 0.1, y: -H * 0.1, width: W * 0.9, height: H * 1.2), rotation: 8)
+    NSGraphicsContext.restoreGraphicsState()
+
+    let U: CGFloat = 1500          // type unit, so text reads on a phone
+    let left: CGFloat = 150
+    var top = H - 150              // running top edge, working down
+
+    // Icon and name
+    let iconSize = U * 0.19
+    let icon = render(Int(iconSize * 2), Int(iconSize * 2)) { s, _ in drawAppIcon(s) }
+    icon.draw(in: NSRect(x: left - iconSize * 0.1, y: top - iconSize, width: iconSize, height: iconSize), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+    let title = NSAttributedString(string: "StickyShot", attributes: [.font: font("Aeonik-Bold", U * 0.125), .foregroundColor: cream, .kern: -U * 0.003])
+    title.draw(at: NSPoint(x: left + iconSize * 0.95, y: top - iconSize + iconSize * 0.05))
+    top -= iconSize + 70
+
+    let pitch = NSAttributedString(string: "Your Mac screenshot preview,\nkept on screen until you close it.",
+                                   attributes: [.font: font("Aeonik-Medium", U * 0.042), .foregroundColor: NSColor.white])
+    let ps = pitch.size()
+    pitch.draw(at: NSPoint(x: left, y: top - ps.height))
+    top -= ps.height + 70
+
+    let benefits = [
+        "Stays up until you close it, or on a timer",
+        "Take several and they stack in the corner",
+        "Drag into Mail, Slack or Messages: it stays put",
+        "Click to open, right-click to copy, find or trash",
+        "Pops up the instant you take the shot",
+        "Free and private: no account, never online",
+    ]
+    let rowH = U * 0.068
+    for text in benefits {
+        let t = NSAttributedString(string: text, attributes: [.font: font("Aeonik-Regular", U * 0.04), .foregroundColor: NSColor.white])
+        let y = top - t.size().height
+        drawBolt(in: NSRect(x: left, y: y + U * 0.002, width: U * 0.038, height: U * 0.05), rotation: 0)
+        t.draw(at: NSPoint(x: left + U * 0.065, y: y))
+        top -= rowH
+    }
+
+    // Footer
+    let tagText = NSAttributedString(string: "FREE FOR MAC", attributes: [.font: font("Aeonik-Medium", U * 0.03), .foregroundColor: ink, .kern: U * 0.004])
+    let tagSize = tagText.size()
+    let tag = NSRect(x: left, y: 140, width: tagSize.width + U * 0.05, height: tagSize.height + U * 0.024)
+    cream.setFill()
+    NSBezierPath(roundedRect: tag, xRadius: tag.height / 2, yRadius: tag.height / 2).fill()
+    tagText.draw(at: NSPoint(x: tag.minX + U * 0.025, y: tag.minY + U * 0.012))
+    let by = NSAttributedString(string: "by", attributes: [.font: font("Aeonik-Regular", U * 0.034), .foregroundColor: NSColor.white.withAlphaComponent(0.9)])
+    let byX = tag.maxX + U * 0.035
+    by.draw(at: NSPoint(x: byX, y: tag.midY - by.size().height / 2))
+    let wmH = tag.height * 0.78
+    let wmW = wmH * wordmark.size.width / wordmark.size.height
+    wordmark.draw(in: NSRect(x: byX + by.size().width + U * 0.014, y: tag.midY - wmH / 2, width: wmW, height: wmH))
+    let site = NSAttributedString(string: "getzapped.xyz", attributes: [.font: font("Aeonik-Medium", U * 0.034), .foregroundColor: NSColor.white.withAlphaComponent(0.9)])
+    site.draw(at: NSPoint(x: byX + by.size().width + U * 0.014 + wmW + U * 0.028, y: tag.midY - site.size().height / 2))
+
+    // The desktop fills the space between the benefits and the footer
+    let deskTop = top - 30, deskBottom = tag.maxY + 80
+    drawDesktop(NSRect(x: left, y: deskBottom, width: W - left * 2, height: deskTop - deskBottom), 1450, cards: 2, cardFrac: 0.2)
+}, outDir.appendingPathComponent("StickyShot-instagram.png"))
 print("done")
